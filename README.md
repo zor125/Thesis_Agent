@@ -1,7 +1,8 @@
-# paper-agent
+# Thesis Agent
 
-Paper Agent is a Python project scaffold for building an agent that can search,
-read, summarize, and organize research papers.
+Thesis Agent is a Level 2 paper research pipeline. It fetches new arXiv papers,
+ranks them against your research interests, summarizes the Top20, deeply reads
+the Top3 PDFs, and saves Obsidian-ready Markdown notes.
 
 ## Project Structure
 
@@ -24,23 +25,81 @@ paper-agent/
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python -m paper_agent
 ```
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in any required API keys.
+Copy `.env.example` to `.env` and set your OpenAI API key.
 
 ```bash
 cp .env.example .env
 ```
 
-Application defaults live in `config.yaml`.
+```text
+OPENAI_API_KEY=your_api_key_here
+```
+
+Configure interests, ranking size, model names, and Obsidian output in
+`config.yaml`.
+
+```yaml
+interests:
+  - LLM Agents
+  - Coding Agents
+  - RAG
+  - Memory
+  - Reasoning
+  - Multimodal
+  - Robotics
+  - Software Engineering
+  - Long Context
+  - Planning
+  - MCP
+  - Tool Use
+  - AI Automation
+
+fetch:
+  category: cs.AI
+  max_results: 100
+
+ranking:
+  top_k: 20
+  deep_read_k: 3
+
+obsidian:
+  vault_path: "/Users/yourname/Documents/ObsidianVault"
+  folder: "AI Papers"
+
+models:
+  embedding: text-embedding-3-small
+  summary: gpt-4.1-mini
+  deep_read: gpt-4.1-mini
+```
+
+## Run Daily Pipeline
+
+```bash
+python daily.py
+```
+
+The pipeline:
+
+1. Fetches today's `cs.AI` arXiv papers.
+2. Embeds each paper's `title + abstract`.
+3. Embeds your configured interests as a natural-language research profile.
+4. Selects the Top20 by cosine similarity.
+5. Summarizes the Top20 from abstracts.
+6. Downloads and deeply analyzes only the Top3 PDFs.
+7. Adds `My Insight`, `Startup Idea`, `Project Idea`, and `Related Topics`.
+8. Saves Markdown notes as `YYYY-MM-DD-title.md` in your Obsidian vault.
+
+`Related Topics` are written as Obsidian wikilinks such as `[[RAG]]`,
+`[[Agent]]`, and `[[Robotics]]`, so the graph view becomes useful over time.
 
 ## Tests
 
 ```bash
-pytest
+PYTHONPATH=src:. pytest
 ```
 
 ## Fetch Today's arXiv Papers
@@ -102,9 +161,14 @@ python save.py --input top20.json --mode ranking --vault ~/Documents/ObsidianVau
 
 ## Daily GitHub Action
 
-The `Daily Paper Fetch` workflow runs every day at 07:00 KST, fetches up to
-100 `cs.AI` papers, and uploads `papers_today.json` as an artifact. It can also
-be started manually from the GitHub Actions tab.
+The `Daily Paper Agent` workflow runs every day at 07:00 KST. It runs the full
+pipeline in `daily.py` and uploads the generated Obsidian Markdown files as an
+artifact. Add `OPENAI_API_KEY` as a GitHub Actions secret before enabling it.
+It can also be started manually from the GitHub Actions tab.
+
+In GitHub Actions, `OBSIDIAN_VAULT_PATH` is set to `obsidian` so the generated
+Markdown can be uploaded as an artifact. Locally, `config.yaml` controls the
+Obsidian vault path unless you set `OBSIDIAN_VAULT_PATH` yourself.
 
 ## Docker
 

@@ -1,4 +1,4 @@
-name: Daily Paper Fetch
+name: Daily Paper Agent
 
 on:
   schedule:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  fetch:
+  daily:
     runs-on: ubuntu-latest
 
     steps:
@@ -24,11 +24,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Fetch today's cs.AI papers
-        run: python fetch.py --category cs.AI --max-results 100 --output papers_today.json
+      - name: Run daily pipeline
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OBSIDIAN_VAULT_PATH: obsidian
+        run: python daily.py
 
-      - name: Upload fetched papers
+      - name: Upload Obsidian Markdown
         uses: actions/upload-artifact@v4
         with:
-          name: papers-today
-          path: papers_today.json
+          name: obsidian-daily-papers
+          path: obsidian/

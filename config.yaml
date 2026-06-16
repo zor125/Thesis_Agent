@@ -1,10 +1,31 @@
-app:
-  name: paper-agent
-  environment: development
+interests:
+  - LLM Agents
+  - Coding Agents
+  - RAG
+  - Memory
+  - Reasoning
+  - Multimodal
+  - Robotics
+  - Software Engineering
+  - Long Context
+  - Planning
+  - MCP
+  - Tool Use
+  - AI Automation
 
-papers:
-  default_source: arxiv
-  max_results: 10
+fetch:
+  category: cs.AI
+  max_results: 100
 
-logging:
-  level: INFO
+ranking:
+  top_k: 20
+  deep_read_k: 3
+
+obsidian:
+  vault_path: "/Users/zor125/Desktop/AI PAPER"
+  folder: "AI Papers"
+
+models:
+  embedding: text-embedding-3-small
+  summary: gpt-4.1-mini
+  deep_read: gpt-4.1-mini

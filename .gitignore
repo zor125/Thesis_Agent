@@ -17,6 +17,7 @@ embeddings.json
 top20.json
 query_embedding.json
 obsidian/
+.paper_agent_cache/
 
 # OS/editor
 .DS_Store
