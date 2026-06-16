@@ -1,0 +1,10 @@
+app:
+  name: paper-agent
+  environment: development
+
+papers:
+  default_source: arxiv
+  max_results: 10
+
+logging:
+  level: INFO
