@@ -37,6 +37,7 @@ class DailyNoteSummary:
     hidden_gems: list[str] = field(default_factory=list)
     project_ideas: list[str] = field(default_factory=list)
     startup_ideas: list[str] = field(default_factory=list)
+    research_ideas: list[str] = field(default_factory=list)
 
 
 def run_weekly_review(config_path: Path, *, week_ending: date | None = None) -> Path:
@@ -80,6 +81,7 @@ def parse_daily_note(path: Path, *, base_dir: Path, note_date: date) -> DailyNot
         trends=parse_trend_labels(text),
         hidden_gems=parse_hidden_gems(text),
         project_ideas=parse_project_ideas(text),
+        research_ideas=parse_research_ideas(text),
     )
     summary.startup_ideas = parse_startup_ideas_from_linked_papers(text, base_dir)
     return summary
@@ -195,6 +197,25 @@ def parse_project_ideas(text: str) -> list[str]:
     return unique_preserving_order(ideas)
 
 
+def parse_research_ideas(text: str) -> list[str]:
+    section = extract_section(text, "## 💡 Today's Research Ideas")
+    if not section:
+        return []
+    ideas: list[str] = []
+    current: list[str] = []
+    for line in section.splitlines():
+        stripped = line.strip()
+        if re.match(r"\d+\.\s+Idea:", stripped):
+            if current:
+                ideas.append(" ".join(current))
+            current = [stripped]
+        elif current and (stripped.startswith("Based on:") or stripped.startswith("Why promising:") or stripped.startswith("Difficulty:") or stripped.startswith("First experiment:")):
+            current.append(stripped)
+    if current:
+        ideas.append(" ".join(current))
+    return unique_preserving_order(ideas)
+
+
 def parse_startup_ideas_from_linked_papers(text: str, base_dir: Path) -> list[str]:
     ideas: list[str] = []
     for link, _label in WIKILINK_PATTERN.findall(text):
@@ -231,11 +252,7 @@ def render_weekly_report(notes: Sequence[DailyNoteSummary], week_ending: date) -
     }
     lines = [
         render_front_matter(front_matter),
-        f"# {week_ending.strftime('%G-W%V')} Weekly AI Research Report",
-        "",
-        "## Reading Statistics",
-        "",
-        *render_reading_statistics(notes, all_papers, week_start, week_ending),
+        "# Weekly AI Research Review",
         "",
         "## Top Papers",
         "",
@@ -253,13 +270,25 @@ def render_weekly_report(notes: Sequence[DailyNoteSummary], week_ending: date) -
         "",
         *render_hidden_gems(notes),
         "",
+        "## Research Ideas",
+        "",
+        *render_research_ideas(notes, all_papers),
+        "",
         "## Project Ideas",
         "",
         *render_project_ideas(notes),
         "",
-        "## Startup Ideas",
+        "## What I Should Read Next",
         "",
-        *render_startup_ideas(notes),
+        *render_what_to_read_next(all_papers),
+        "",
+        "## Weekly Summary",
+        "",
+        *render_weekly_summary(notes, all_papers, week_start, week_ending),
+        "",
+        "## Reading Statistics",
+        "",
+        *render_reading_statistics(notes, all_papers, week_start, week_ending),
         "",
     ]
     return "\n".join(lines)
@@ -283,7 +312,7 @@ def render_reading_statistics(
     ]
 
 
-def render_top_papers(papers: Sequence[DailyPaperRow], limit: int = 10) -> list[str]:
+def render_top_papers(papers: Sequence[DailyPaperRow], limit: int = 5) -> list[str]:
     if not papers:
         return ["No Daily notes found for this week."]
     sorted_papers = sorted(papers, key=lambda paper: (paper.score, paper.deep_read, paper.saved), reverse=True)
@@ -322,11 +351,39 @@ def render_emerging_topics(notes: Sequence[DailyNoteSummary], papers: Sequence[D
     return [f"- {topic}: appeared late in the week with {counts[topic]} total mentions." for topic in emerging[:10]]
 
 
-def render_hidden_gems(notes: Sequence[DailyNoteSummary]) -> list[str]:
+def render_hidden_gems(notes: Sequence[DailyNoteSummary], limit: int = 3) -> list[str]:
     gems = unique_preserving_order(gem for note in notes for gem in note.hidden_gems)
     if not gems:
         return ["No hidden gems recorded."]
-    return [f"- {gem}" for gem in gems[:10]]
+    return [f"- {gem}" for gem in gems[:limit]]
+
+
+def render_research_ideas(
+    notes: Sequence[DailyNoteSummary],
+    papers: Sequence[DailyPaperRow],
+    limit: int = 5,
+) -> list[str]:
+    ideas = unique_preserving_order(idea for note in notes for idea in note.research_ideas)
+    if not ideas:
+        ideas = generate_research_ideas_from_papers(papers)
+    if not ideas:
+        return ["No research ideas generated this week."]
+    return [f"{index}. {idea}" for index, idea in enumerate(ideas[:limit], start=1)]
+
+
+def generate_research_ideas_from_papers(papers: Sequence[DailyPaperRow]) -> list[str]:
+    top = sorted(papers, key=lambda paper: (paper.score, paper.deep_read, paper.saved), reverse=True)[:5]
+    ideas: list[str] = []
+    for paper in top:
+        topic = paper.tags[0] if paper.tags else "AI systems"
+        ideas.append(
+            f"Idea: Can a focused evaluation protocol improve {topic} reliability? "
+            f"Based on: {paper_link(paper)} "
+            f"Why promising: this paper ranked highly this week and connects to repeated weekly topics. "
+            f"Difficulty: ⭐⭐⭐☆☆ "
+            f"First experiment: build 10 examples and compare one baseline against one modified method."
+        )
+    return ideas
 
 
 def render_project_ideas(notes: Sequence[DailyNoteSummary]) -> list[str]:
@@ -341,6 +398,39 @@ def render_startup_ideas(notes: Sequence[DailyNoteSummary]) -> list[str]:
     if not ideas:
         return ["No startup ideas found in linked Paper notes."]
     return [f"- {idea}" for idea in ideas[:10]]
+
+
+def render_what_to_read_next(papers: Sequence[DailyPaperRow], limit: int = 5) -> list[str]:
+    saved_or_deep = [paper for paper in papers if paper.saved or paper.deep_read]
+    candidates = sorted(saved_or_deep or list(papers), key=lambda paper: (paper.deep_read, paper.saved, paper.score), reverse=True)
+    if not candidates:
+        return ["No reading recommendations available yet."]
+    return [
+        f"{index}. {paper_link(paper)} — revisit {', '.join(paper.tags[:3]) if paper.tags else 'this topic'} before the next Daily run."
+        for index, paper in enumerate(candidates[:limit], start=1)
+    ]
+
+
+def render_weekly_summary(
+    notes: Sequence[DailyNoteSummary],
+    papers: Sequence[DailyPaperRow],
+    week_start: date,
+    week_ending: date,
+) -> list[str]:
+    trend_counts = Counter()
+    for note in notes:
+        trend_counts.update(note.trends)
+    for paper in papers:
+        trend_counts.update(paper.tags)
+    top_trends = ", ".join(topic for topic, _count in trend_counts.most_common(3)) or "no dominant topics"
+    saved_count = sum(1 for paper in papers if paper.saved)
+    deep_count = sum(1 for paper in papers if paper.deep_read)
+    return [
+        f"- Period: {week_start.isoformat()} to {week_ending.isoformat()}",
+        f"- Core direction: {top_trends}",
+        f"- Papers reviewed: {len(papers)} candidates, {saved_count} saved notes, {deep_count} deep reads",
+        f"- Takeaway: focus next week on turning the strongest recurring topic into one small reproducible experiment.",
+    ]
 
 
 def paper_link(paper: DailyPaperRow) -> str:

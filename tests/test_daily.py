@@ -652,6 +652,13 @@ def test_render_daily_index_includes_interest_level_and_tags():
     assert "## 💡 Today's Project" in markdown
     assert "- Project: Project." in markdown
     assert "- Tech Stack: Python, OpenAI API, arXiv metadata, Obsidian Markdown" in markdown
+    assert "Research Ideas" in markdown
+    assert "1. Idea:" in markdown
+    assert "2. Idea:" in markdown
+    assert "3. Idea:" in markdown
+    assert "Based on:" in markdown
+    assert "Why promising:" in markdown
+    assert "First experiment:" in markdown
     assert "## Top20 Candidates" in markdown
     assert "⭐⭐⭐⭐⭐" in markdown
     assert "`dataset`" in markdown

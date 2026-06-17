@@ -448,9 +448,11 @@ def save_daily_markdown(
     )
     memory_entries = load_memory_db(PAPER_MEMORY_DB_PATH)
 
+    daily_ranked_papers = [saved_by_rank.get(ranked.rank, ranked) for ranked in candidate_papers]
+
     index_path = daily_dir / f"{target_date.isoformat()}.md"
     index_path.write_text(
-        render_daily_index(candidate_papers, target_date, saved_ranks=set(saved_by_rank), deep_ranks=set(deep_by_rank)),
+        render_daily_index(daily_ranked_papers, target_date, saved_ranks=set(saved_by_rank), deep_ranks=set(deep_by_rank)),
         encoding="utf-8",
     )
     saved_paths.append(index_path)
@@ -1982,7 +1984,7 @@ def render_daily_index(
         "",
         *render_research_newspaper_sections(ranked_papers, saved_ranks=saved_ranks),
         "",
-        *render_daily_briefing_sections(ranked_papers, saved_ranks=saved_ranks),
+        *render_daily_briefing_sections(ranked_papers, saved_ranks=saved_ranks, deep_ranks=deep_ranks),
         "",
         "## Top20 Candidates",
         "",
@@ -2362,17 +2364,18 @@ def render_daily_briefing_sections(
     ranked_papers: Sequence[RankedPaper],
     *,
     saved_ranks: set[int],
+    deep_ranks: set[int],
 ) -> list[str]:
     return [
         "## 🔥 Must Read Today",
         "",
         *render_must_read_today(ranked_papers[:2], saved_ranks=saved_ranks),
         "",
-        "## 📈 Today's Research Trends",
+        "## 📈 Today\u0027s Research Trends",
         "",
         *render_research_trends(ranked_papers),
         "",
-        "## 🏆 Editor's Pick",
+        "## 🏆 Editor\u0027s Pick",
         "",
         *render_editors_pick(ranked_papers, saved_ranks=saved_ranks),
         "",
@@ -2380,9 +2383,13 @@ def render_daily_briefing_sections(
         "",
         *render_recommended_reading_order(ranked_papers[:5], saved_ranks=saved_ranks),
         "",
-        "## 💡 Today's Project",
+        "## 💡 Today\u0027s Project",
         "",
         *render_todays_project(ranked_papers[:5]),
+        "",
+        "## 💡 Today\u0027s Research Ideas",
+        "",
+        *render_todays_research_ideas(ranked_papers[:5], saved_ranks=saved_ranks, deep_ranks=deep_ranks),
     ]
 
 
@@ -2656,6 +2663,134 @@ def render_todays_project(ranked_papers: Sequence[RankedPaper]) -> list[str]:
         "- Tech Stack: Python, OpenAI API, arXiv metadata, Obsidian Markdown",
         f"- First Step: {build_plan.suggested_mini_project}",
     ]
+
+
+def render_todays_research_ideas(
+    ranked_papers: Sequence[RankedPaper],
+    *,
+    saved_ranks: set[int],
+    deep_ranks: set[int],
+) -> list[str]:
+    sources = list(ranked_papers[:5])
+    if not sources:
+        return [
+            "1. Idea: 오늘은 연구 아이디어를 만들 Top5 논문이 부족합니다.",
+            "   Based on: _No saved papers available._",
+            "   Why promising: 후보 논문이 쌓이면 반복 주제와 Deep Read 근거를 연결해 연구 질문을 생성합니다.",
+            "   Difficulty: ⭐⭐☆☆☆",
+            "   First experiment: 내일 Daily Note에서 Top5 후보와 Deep Read 노트가 생성되는지 확인합니다.",
+        ]
+
+    deep_sources = [ranked for ranked in sources if ranked.rank in deep_ranks or ranked.deep_analysis.strip()]
+    lines: list[str] = []
+    for index in range(3):
+        primary = sources[index % len(sources)]
+        secondary_pool = deep_sources or sources
+        secondary = secondary_pool[index % len(secondary_pool)]
+        if len(sources) > 1 and secondary.rank == primary.rank:
+            secondary = sources[(index + 1) % len(sources)]
+        analysis = primary.analysis or build_analysis_fallback(primary.paper)
+        question = research_question_for_sources(primary, secondary, index)
+        links = research_idea_links(primary, secondary, saved_ranks=saved_ranks, deep_ranks=deep_ranks)
+        lines.extend(
+            [
+                f"{index + 1}. Idea: {question}",
+                f"   Based on: {links}",
+                f"   Why promising: {research_idea_promise(primary, secondary)}",
+                f"   Difficulty: {research_idea_difficulty(primary, secondary)}",
+                f"   First experiment: {research_idea_first_experiment(primary, analysis)}",
+                "",
+            ]
+        )
+    return lines[:-1]
+
+
+def research_question_for_sources(primary: RankedPaper, secondary: RankedPaper, index: int) -> str:
+    analysis = primary.analysis or build_analysis_fallback(primary.paper)
+    text = paper_topic_text(primary.paper, analysis)
+    topic = compact_topic_label(primary)
+    if contains_any(text, ["benchmark", "evaluation", "metric"]):
+        return f"Can a small failure-focused benchmark for {topic} predict real task success better than aggregate scores?"
+    if contains_any(text, ["rag", "retrieval", "memory", "long context"]):
+        return f"Can adaptive retrieval and memory selection reduce context noise in {topic} tasks?"
+    if contains_any(text, ["agent", "tool", "planning", "coding", "software"]):
+        return f"Can separating planning traces from tool-use logs improve {topic} agent reliability?"
+    if contains_any(text, ["dataset", "corpus", "annotation"]):
+        return f"Can coverage-guided filtering create a smaller but more useful {topic} evaluation dataset?"
+    if index == 1:
+        return f"Which minimal ablation best explains performance differences between {compact_topic_label(primary)} and {compact_topic_label(secondary)}?"
+    return f"Can a one-week reproducible study turn {topic} into a measurable research benchmark?"
+
+
+def research_idea_links(
+    primary: RankedPaper,
+    secondary: RankedPaper,
+    *,
+    saved_ranks: set[int],
+    deep_ranks: set[int],
+) -> str:
+    links = [daily_index_title(primary, saved_ranks=saved_ranks)]
+    if primary.rank in deep_ranks or primary.deep_analysis.strip():
+        links.append(deep_index_title(primary))
+    if secondary.rank != primary.rank:
+        links.append(daily_index_title(secondary, saved_ranks=saved_ranks))
+        if secondary.rank in deep_ranks or secondary.deep_analysis.strip():
+            links.append(deep_index_title(secondary))
+    return ", ".join(unique_preserving_order(links))
+
+
+def deep_index_title(ranked: RankedPaper) -> str:
+    title = str(ranked.paper.get("title", "Untitled Paper"))
+    return f"[[Deep/{paper_note_filename(ranked.paper)}|{escape_wikilink_label(title)} Deep]]"
+
+
+def research_idea_promise(primary: RankedPaper, secondary: RankedPaper) -> str:
+    primary_analysis = primary.analysis or build_analysis_fallback(primary.paper)
+    secondary_analysis = secondary.analysis or build_analysis_fallback(secondary.paper)
+    shared = sorted(
+        set(normalize_tags(primary_analysis.tags or infer_dynamic_tags(primary.paper), max_tags=6))
+        & set(normalize_tags(secondary_analysis.tags or infer_dynamic_tags(secondary.paper), max_tags=6))
+    )
+    if shared:
+        shared_text = ", ".join(shared[:2])
+        return f"Top5 안에서 {shared_text} 축이 반복되어 비교 실험으로 논문화하기 좋습니다."
+    if primary.deep_analysis.strip() or secondary.deep_analysis.strip():
+        return "Deep Read 근거가 있어 초록 수준 아이디어를 방법론과 한계 분석까지 연결할 수 있습니다."
+    return f"{contribution_summary(primary_analysis)} 흐름을 다른 Top5 논문과 비교해 작은 실험 질문으로 좁힐 수 있습니다."
+
+
+def research_idea_difficulty(primary: RankedPaper, secondary: RankedPaper) -> str:
+    combined = f"{paper_topic_text(primary.paper, primary.analysis or build_analysis_fallback(primary.paper))} {paper_topic_text(secondary.paper, secondary.analysis or build_analysis_fallback(secondary.paper))}"
+    if contains_any(combined, ["fine-tuning", "training", "robot", "robotics"]):
+        return "⭐⭐⭐⭐☆"
+    if contains_any(combined, ["benchmark", "dataset", "evaluation", "rag", "memory"]):
+        return "⭐⭐⭐☆☆"
+    return "⭐⭐☆☆☆"
+
+
+def research_idea_first_experiment(primary: RankedPaper, analysis: PaperAnalysis) -> str:
+    text = paper_topic_text(primary.paper, analysis)
+    if contains_any(text, ["benchmark", "evaluation", "metric"]):
+        return "1주일 안에 20개 미니 태스크를 만들고 기존 점수와 실패 유형 점수의 상관을 비교합니다."
+    if contains_any(text, ["rag", "retrieval", "memory", "long context"]):
+        return "논문 10개 QA 세트를 만들고 고정 retrieval과 adaptive retrieval의 정답률과 토큰 비용을 비교합니다."
+    if contains_any(text, ["agent", "tool", "planning", "coding", "software"]):
+        return "간단한 코딩 태스크 10개에서 planner 로그 분리 전후의 성공률과 재시도 횟수를 측정합니다."
+    if contains_any(text, ["dataset", "corpus", "annotation"]):
+        return "샘플 100개를 난이도와 coverage로 태깅한 뒤 작은 평가셋이 전체셋 순위를 보존하는지 확인합니다."
+    return "Top5 논문 중 2편을 골라 같은 입력, 같은 모델, 같은 지표로 최소 재현 실험을 설계합니다."
+
+
+def compact_topic_label(ranked: RankedPaper) -> str:
+    analysis = ranked.analysis or build_analysis_fallback(ranked.paper)
+    labels = normalize_related_topics(analysis.related_topics or infer_related_topics(ranked.paper))
+    if labels:
+        return labels[0]
+    tags = normalize_tags(analysis.tags or infer_dynamic_tags(ranked.paper), max_tags=1)
+    if tags:
+        return display_trend_label(tags[0])
+    title = str(ranked.paper.get("title", "this paper")).split()
+    return " ".join(title[:4]) if title else "this paper"
 
 
 def daily_index_title(ranked: RankedPaper, *, saved_ranks: set[int]) -> str:

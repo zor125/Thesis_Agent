@@ -112,6 +112,34 @@ Each note includes dynamic YAML tags, an interest-level star score, buildability
 fields, and paper-specific `Related Topics` written as Obsidian wikilinks such
 as `[[NLP Evaluation]]` or `[[Educational AI]]`.
 
+## Weekly Review
+
+Generate a weekly AI research report from the last 7 days of `Daily/`, `Papers/`, and `Deep/` notes.
+
+```bash
+python weekly_review.py
+```
+
+The report is saved to the Obsidian vault as:
+
+```text
+AI Papers/Weekly/YYYY-Www.md
+```
+
+## Monthly Review
+
+Generate a 30-day AI trend report from recent `Daily/`, `Papers/`, and `Deep/` notes.
+
+```bash
+python monthly_review.py
+```
+
+The report is saved to the Obsidian vault as:
+
+```text
+AI Papers/Monthly/YYYY-MM.md
+```
+
 ## Research Dashboard
 
 Generate `AI Papers/Dashboard.md` from today's Daily note plus all saved

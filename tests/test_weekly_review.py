@@ -46,6 +46,14 @@ title: "Daily"
 
 - Project: Build an agent benchmark dashboard.
 
+## 💡 Today's Research Ideas
+
+1. Idea: Can agent benchmark failures predict real deployment regressions?
+   Based on: [[Papers/agent-paper|Agent Paper]]
+   Why promising: Agent evaluation appeared repeatedly this week.
+   Difficulty: ⭐⭐⭐☆☆
+   First experiment: Label 20 agent failures and compare them with task success.
+
 ## Top20 Candidates
 
 | Rank | Score | Interest Level | Title | Tags | Saved | Deep Read |
@@ -69,6 +77,7 @@ obsidian:
     markdown = output_path.read_text(encoding="utf-8")
 
     assert output_path == base_dir / "Weekly" / "2026-W25.md"
+    assert "# Weekly AI Research Review" in markdown
     assert "## Top Papers" in markdown
     assert "[[Papers/agent-paper|Agent Paper]]" in markdown
     assert "## Top Trends" in markdown
@@ -76,10 +85,13 @@ obsidian:
     assert "## Emerging Topics" in markdown
     assert "## Hidden Gems" in markdown
     assert "Novel benchmark angle." in markdown
+    assert "## Research Ideas" in markdown
+    assert "Can agent benchmark failures predict real deployment regressions?" in markdown
+    assert "First experiment:" in markdown
     assert "## Project Ideas" in markdown
     assert "Build an agent benchmark dashboard." in markdown
-    assert "## Startup Ideas" in markdown
-    assert "Agent evaluation dashboard" in markdown
+    assert "## What I Should Read Next" in markdown
+    assert "## Weekly Summary" in markdown
     assert "## Reading Statistics" in markdown
     assert "- Candidate papers: 2" in markdown
 
