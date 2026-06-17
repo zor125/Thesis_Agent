@@ -39,7 +39,7 @@ cp .env.example .env
 OPENAI_API_KEY=your_api_key_here
 ```
 
-Configure interests, ranking size, model names, and Obsidian output in
+dConfigure interests, ranking size, model names, and Obsiian output in
 `config.yaml`.
 
 ```yaml
@@ -63,8 +63,9 @@ fetch:
   max_results: 100
 
 ranking:
-  top_k: 20
-  deep_read_k: 3
+  candidate_k: 20
+  save_k: 5
+  deep_read_k: 2
 
 obsidian:
   vault_path: "/Users/yourname/Documents/ObsidianVault"
@@ -87,14 +88,46 @@ The pipeline:
 1. Fetches today's `cs.AI` arXiv papers.
 2. Embeds each paper's `title + abstract`.
 3. Embeds your configured interests as a natural-language research profile.
-4. Selects the Top20 by cosine similarity.
-5. Summarizes the Top20 from abstracts.
-6. Downloads and deeply analyzes only the Top3 PDFs.
-7. Adds `My Insight`, `Startup Idea`, `Project Idea`, and `Related Topics`.
-8. Saves Markdown notes as `YYYY-MM-DD-title.md` in your Obsidian vault.
+4. Selects the Top20 candidates by cosine similarity.
+5. Summarizes and saves only the Top5 paper notes.
+6. Downloads and deeply analyzes only the Top2 PDFs.
+7. Adds `My Insight`, `Can I Build It?`, `Startup Idea`, `Project Idea`, and `Related Topics`.
+8. Saves a daily index plus selected paper/deep-read notes in your Obsidian vault.
 
-`Related Topics` are written as Obsidian wikilinks such as `[[RAG]]`,
-`[[Agent]]`, and `[[Robotics]]`, so the graph view becomes useful over time.
+Output structure:
+
+```text
+AI Papers/
+  Daily/
+    2025-06-16.md
+  Papers/
+    Paper Title.md
+  Deep/
+    Paper Title.md
+```
+
+Each note includes dynamic YAML tags, an interest-level star score, buildability
+fields, and paper-specific `Related Topics` written as Obsidian wikilinks such
+as `[[NLP Evaluation]]` or `[[Educational AI]]`.
+
+## Research Dashboard
+
+Generate `AI Papers/Dashboard.md` from today's Daily note plus all saved
+`Papers/` and `Deep/` notes.
+
+```bash
+python dashboard.py --config config.yaml
+```
+
+Use an explicit dashboard date when needed.
+
+```bash
+python dashboard.py --config config.yaml --date 2026-06-17
+```
+
+The dashboard includes `Must Read`, `Deep Read Queue`, `Project Queue`,
+`Startup Queue`, `Idea Queue`, and exploration tables for all Paper and Deep
+notes.
 
 ## Tests
 

@@ -1,6 +1,8 @@
 import json
 
 from save import (
+    normalize_paper_type,
+    paper_filename,
     render_paper_markdown,
     render_ranking_markdown,
     safe_filename,
@@ -11,6 +13,22 @@ from save import (
 
 def test_safe_filename_removes_obsidian_unfriendly_characters():
     assert safe_filename('2606.12345 A/B: "Test" [Draft]') == "2606.12345 A B Test Draft"
+
+
+def test_paper_filename_uses_arxiv_id_without_version_and_short_slug():
+    assert (
+        paper_filename(
+            "Unified Software Engineering Agent as AI Software Engineer: A Very Long Study",
+            "2506.14683v2",
+        )
+        == "2506.14683-unified-software-engineering-agent"
+    )
+
+
+def test_normalize_paper_type_keeps_known_types_and_defaults_to_research():
+    assert normalize_paper_type("survey") == "Survey"
+    assert normalize_paper_type("Benchmark") == "Benchmark"
+    assert normalize_paper_type("unknown") == "Research"
 
 
 def test_render_paper_markdown_includes_front_matter_and_links():
@@ -61,6 +79,7 @@ def test_save_papers_writes_markdown_files(tmp_path):
     assert len(saved_paths) == 1
     assert saved_paths[0].exists()
     assert saved_paths[0].suffix == ".md"
+    assert saved_paths[0].name == "2606.12345-useful-ai-paper.md"
 
 
 def test_save_ranking_writes_single_note(tmp_path):

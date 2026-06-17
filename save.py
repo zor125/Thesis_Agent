@@ -6,11 +6,12 @@ import re
 import sys
 from datetime import date
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Iterable, Sequence
 
 
 DEFAULT_VAULT_DIR = Path("obsidian")
 DEFAULT_FOLDER = "papers"
+PAPER_TYPES = {"Survey", "Research", "Benchmark", "Dataset", "System", "Position"}
 
 
 def save_papers(
@@ -26,7 +27,7 @@ def save_papers(
     for paper in papers:
         title = str(paper.get("title", "Untitled Paper"))
         arxiv_id = str(paper.get("arxiv_id", "")).strip()
-        filename = safe_filename(f"{arxiv_id} {title}" if arxiv_id else title)
+        filename = paper_filename(title, arxiv_id)
         output_path = output_dir / f"{filename}.md"
         output_path.write_text(render_paper_markdown(paper), encoding="utf-8")
         saved_paths.append(output_path)
@@ -135,6 +136,60 @@ def safe_filename(value: str, *, max_length: int = 120) -> str:
     if not cleaned:
         cleaned = "untitled"
     return cleaned[:max_length].rstrip()
+
+
+def paper_filename(title: str, arxiv_id: str = "", *, max_words: int = 8) -> str:
+    arxiv = normalize_arxiv_id(arxiv_id)
+    slug = short_slug(title, max_words=max_words)
+    return f"{arxiv}-{slug}" if arxiv else slug
+
+
+def normalize_arxiv_id(value: str) -> str:
+    cleaned = str(value).strip()
+    cleaned = cleaned.rsplit("/", 1)[-1]
+    cleaned = re.sub(r"v\d+$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[^0-9A-Za-z.\-]+", "", cleaned)
+    return cleaned
+
+
+def short_slug(value: str, *, max_words: int = 8) -> str:
+    text = str(value).lower()
+    text = re.split(r"\s+as\s+|[:\-–—]", text, maxsplit=1)[0]
+    words = re.findall(r"[A-Za-z0-9]+", text)
+    words = words[:max(1, max_words)]
+    return "-".join(words) or "untitled"
+
+
+def kebab_case(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower())
+    cleaned = re.sub(r"-+", "-", cleaned).strip("-")
+    return cleaned or "topic"
+
+
+def normalize_tags(values: Iterable[str], *, max_tags: int | None = None) -> list[str]:
+    seen = set()
+    tags = []
+    for value in values:
+        tag = kebab_case(str(value))
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        tags.append(tag)
+        if max_tags is not None and len(tags) >= max_tags:
+            break
+    return tags
+
+
+def normalize_paper_type(value: str) -> str:
+    normalized = str(value).strip().lower()
+    for paper_type in PAPER_TYPES:
+        if paper_type.lower() == normalized:
+            return paper_type
+    return "Research"
+
+
+def escape_wikilink_label(value: str) -> str:
+    return str(value).replace("[", "").replace("]", "").replace("|", "-").strip()
 
 
 def as_string_list(value: Any) -> list[str]:

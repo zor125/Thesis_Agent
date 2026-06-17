@@ -18,8 +18,9 @@ fetch:
   max_results: 100
 
 ranking:
-  top_k: 20
-  deep_read_k: 3
+  candidate_k: 20
+  save_k: 5
+  deep_read_k: 2
 
 obsidian:
   vault_path: "/Users/zor125/Desktop/AI PAPER"
