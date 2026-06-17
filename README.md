@@ -2,7 +2,7 @@
 
 Thesis Agent is a Level 2 paper research pipeline. It fetches new arXiv papers,
 ranks them against your research interests, summarizes the Top20, deeply reads
-the Top3 PDFs, and saves Obsidian-ready Markdown notes.
+the Top2 PDFs, and saves Obsidian-ready Markdown notes.
 
 ## Project Structure
 
@@ -27,6 +27,29 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## Daily Workflow
+
+When you log in to macOS:
+
+1. LaunchAgent automatically starts Thesis Agent.
+2. Yesterday's arXiv papers are fetched to avoid timezone and update delays.
+3. Top20 papers are ranked.
+4. Top5 Paper notes are generated.
+5. Top2 Deep notes are generated.
+6. Daily note is written to the Obsidian vault.
+
+Recommended daily routine:
+
+- Read Daily note: 2-3 min
+- Read one Paper note
+- Read one Deep note
+- Write your own:
+  - My Idea
+  - Question
+  - Criticism
+
+The goal is not to read many papers, but to accumulate research insights.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and set your OpenAI API key.
@@ -36,8 +59,10 @@ cp .env.example .env
 ```
 
 ```text
-OPENAI_API_KEY=your_api_key_here
+OPENAI_API_KEY=sk-...
 ```
+
+Do NOT wrap the key in unmatched quotes. Keep `.env` simple: one key-value pair per line.
 
 Configure interests, ranking size, model names, and Obsidian output in
 `config.yaml`.
@@ -120,11 +145,26 @@ Generate a weekly AI research report from the last 7 days of `Daily/`, `Papers/`
 python weekly_review.py
 ```
 
+Use an explicit week ending date when needed.
+
+```bash
+python weekly_review.py --week-ending YYYY-MM-DD
+```
+
 The report is saved to the Obsidian vault as:
 
 ```text
 AI Papers/Weekly/YYYY-Www.md
 ```
+
+## Weekly Workflow
+
+Recommended:
+
+- Read Weekly Summary
+- Check Top Trends
+- Check Top Deep Reads
+- Review your ideas from this week
 
 ## Monthly Review
 
@@ -139,6 +179,15 @@ The report is saved to the Obsidian vault as:
 ```text
 AI Papers/Monthly/YYYY-MM.md
 ```
+
+## Monthly Workflow
+
+Review:
+
+- Major trends
+- Emerging topics
+- Research gaps
+- My future direction
 
 ## Research Dashboard
 
@@ -164,7 +213,7 @@ notes.
 ```bash
 PYTHONPATH=src:. pytest
 ```
-ㅋ
+
 CI:
 
 - pytest only, no OpenAI API calls
@@ -256,12 +305,22 @@ LaunchAgent and is not used by GitHub Actions.
 
 The LaunchAgent is configured to run Paper_Agent from `/Users/zor125/Projects/Paper_Agent`. If you move the project directory later, update the scripts or reinstall after adjusting that path.
 
+The automatic macOS launcher uses yesterday's date by default to avoid arXiv indexing delays.
+
+Example:
+
+```text
+Login on:      2026-06-17
+Pipeline date: 2026-06-16
+```
+
 The launcher:
 
 - enters the project root
-- activates `.venv` when it exists
-- reads `OPENAI_API_KEY` from `.env` or the shell environment
-- runs `python daily.py --date YYYY-MM-DD`
+- waits 30 seconds for network readiness
+- uses `.venv/bin/python` when it exists
+- reads only `OPENAI_API_KEY` from `.env` or the shell environment
+- runs `daily.py` with yesterday's date
 - skips execution when `logs/last_run_YYYY-MM-DD` already exists
 - writes stdout/stderr logs under `logs/`
 - opens Obsidian after a successful run
@@ -292,6 +351,54 @@ Remove:
 ```bash
 ./scripts/uninstall_launchd.sh
 ```
+
+## Troubleshooting
+
+If automatic execution does not work:
+
+1. Check the LaunchAgent state.
+
+```bash
+launchctl print gui/$(id -u)/com.zor125.paperagent
+```
+
+2. Check generated logs.
+
+```bash
+ls logs/
+```
+
+3. Read the daily run log for the pipeline date.
+
+```bash
+cat logs/run_daily_YYYY-MM-DD.log
+```
+
+4. Check that:
+
+- `.venv` exists
+- `OPENAI_API_KEY` is valid
+- `config.yaml` paths are correct
+- the Obsidian vault path exists
+
+## Philosophy
+
+Thesis Agent is not designed to maximize the number of papers you read.
+
+It is designed to maximize long-term research understanding.
+
+The recommended workflow is:
+
+```text
+Daily
+→ Papers
+→ Deep
+→ Weekly
+→ Monthly
+→ Personal Insights
+```
+
+Your own ideas, questions, and criticisms are the most valuable output of the system.
 
 ## Docker
 
