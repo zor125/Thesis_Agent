@@ -976,6 +976,19 @@ def test_render_deep_markdown_adds_evaluation_when_missing():
     assert "## Future Work Ideas" in markdown
     assert "## Related Papers" in markdown
     assert "No strong related papers found." in markdown
+    assert "# 🧠 Personal Research Notes" in markdown
+    assert "## 💡 My Idea" in markdown
+    assert "## ❓ My Question" in markdown
+    assert "## ⚠️ My Criticism" in markdown
+    assert "## 🔬 My Experiment Idea" in markdown
+    assert "## 🛠️ Can I Build It?" in markdown
+    assert "- [ ] Yes" in markdown
+    assert "- [ ] Maybe" in markdown
+    assert "- [ ] No" in markdown
+    assert "## 🔗 Related Notes" in markdown
+    assert "- [[ ]]" in markdown
+    assert "## ⭐ Personal Interest" in markdown
+    assert markdown.rstrip().endswith("---")
 
 
 def test_render_deep_markdown_adds_code_resources_from_deep_analysis():
