@@ -1,8 +1,36 @@
 # Thesis Agent
 
+An Obsidian-based AI research assistant for arXiv paper ranking, summarization, and deep reading.
+
 Thesis Agent is a Level 2 paper research pipeline. It fetches new arXiv papers,
 ranks them against your research interests, summarizes the Top20, deeply reads
 the Top2 PDFs, and saves Obsidian-ready Markdown notes.
+
+## GitHub About
+
+Recommended repository description:
+
+```text
+Obsidian-based AI research assistant for arXiv paper ranking, summarization, and deep reading.
+```
+
+Recommended topics:
+
+```text
+arxiv, openai, obsidian, research-agent, paper-ranking, literature-review, rag, llm-agents, ai-research, python
+```
+
+## Examples
+
+Sample generated notes are available in `examples/`:
+
+```text
+examples/sample-daily.md
+examples/sample-paper.md
+examples/sample-deep.md
+```
+
+They contain no API keys or personal information.
 
 ## Project Structure
 
@@ -12,6 +40,7 @@ paper-agent/
     paper_agent/
   tests/
   docker/
+  examples/
   .github/workflows/
   README.md
   requirements.txt
@@ -128,9 +157,13 @@ AI Papers/
   Daily/
     2025-06-16.md
   Papers/
-    Paper Title.md
+    2506.xxxx-short-title.md
   Deep/
-    Paper Title.md
+    2506.xxxx-short-title.md
+  Weekly/
+    2026-W25.md
+  Monthly/
+    2026-06.md
 ```
 
 Each note includes dynamic YAML tags, an interest-level star score, buildability
@@ -344,6 +377,7 @@ Check logs:
 cat logs/launchd.out.log
 cat logs/launchd.err.log
 cat logs/run_daily_$(date +%F).log
+cat logs/run_daily_$(date -v-1d +%F).log
 ```
 
 Remove:
@@ -372,6 +406,7 @@ ls logs/
 
 ```bash
 cat logs/run_daily_YYYY-MM-DD.log
+cat logs/run_daily_$(date -v-1d +%F).log
 ```
 
 4. Check that:
