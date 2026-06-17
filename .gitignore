@@ -19,6 +19,7 @@ query_embedding.json
 obsidian/
 .paper_agent_cache/
 .cache/
+logs/
 
 # OS/editor
 .DS_Store

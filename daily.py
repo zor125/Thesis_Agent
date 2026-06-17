@@ -2040,16 +2040,49 @@ def render_research_newspaper_sections(
 def render_todays_headlines(ranked_papers: Sequence[RankedPaper]) -> list[str]:
     if not ranked_papers:
         return [
-            "* AI 연구 후보 수집 대기",
-            "* Agent Evaluation 흐름 점검 필요",
-            "* Coding Agent 프로젝트 아이디어 탐색 지속",
+            "* Research Trend: AI 연구 후보 수집 대기",
+            "* Benchmark: Agent Evaluation 흐름 점검 필요",
+            "* Application: Coding Agent 프로젝트 아이디어 탐색 지속",
         ]
 
+    return [
+        f"* Research Trend: {research_trend_headline(ranked_papers)}",
+        f"* Benchmark: {benchmark_headline(ranked_papers)}",
+        f"* Application: {application_headline(ranked_papers)}",
+    ]
+
+
+def research_trend_headline(ranked_papers: Sequence[RankedPaper]) -> str:
     trend_counts = collect_trend_counts(ranked_papers)
-    top_trends = unique_preserving_order(label for label, _ in trend_counts)[:3]
-    defaults = ["AI Software Engineer 연구 증가", "Agent Evaluation 연구 활발", "RL Reasoning 논문 지속 증가"]
-    headlines = [headline_for_trend(label, ranked_papers) for label in top_trends]
-    return [f"* {headline}" for headline in unique_preserving_order([*headlines, *defaults])[:3]]
+    top_labels = [label for label, _ in trend_counts[:3]]
+    if not top_labels:
+        return "Top20이 여러 주제로 분산되어 있어 새로운 연구 흐름을 직접 비교할 필요가 있습니다."
+    contribution = trend_contribution_phrase(top_labels[0], ranked_papers)
+    return f"{', '.join(top_labels)} 흐름이 두드러지며, 핵심은 {contribution}입니다."
+
+
+def benchmark_headline(ranked_papers: Sequence[RankedPaper]) -> str:
+    paper = first_paper_matching(ranked_papers, ["benchmark", "evaluation", "metric", "leaderboard"])
+    if paper is None:
+        return "명확한 벤치마크 논문은 적지만 Top20 전반에서 평가 기준 확인이 필요합니다."
+    analysis = paper.analysis or build_analysis_fallback(paper.paper)
+    return f"{short_title(paper)}가 {contribution_summary(analysis)}을 통해 평가 기준을 강화합니다."
+
+
+def application_headline(ranked_papers: Sequence[RankedPaper]) -> str:
+    paper = first_paper_matching(ranked_papers, ["agent", "tool", "coding", "software", "rag", "robot", "system"])
+    if paper is None:
+        return "응용 관점에서는 아직 직접 구현 가능한 프로젝트 후보를 선별해야 합니다."
+    analysis = paper.analysis or build_analysis_fallback(paper.paper)
+    return f"{short_title(paper)}는 {practical_project_name(paper, analysis)}로 축소해 구현해볼 수 있습니다."
+
+
+def first_paper_matching(ranked_papers: Sequence[RankedPaper], keywords: Sequence[str]) -> RankedPaper | None:
+    for ranked in ranked_papers:
+        analysis = ranked.analysis or build_analysis_fallback(ranked.paper)
+        if contains_any(paper_topic_text(ranked.paper, analysis), keywords):
+            return ranked
+    return ranked_papers[0] if ranked_papers else None
 
 
 def headline_for_trend(label: str, ranked_papers: Sequence[RankedPaper] | None = None) -> str:
@@ -2210,10 +2243,20 @@ def render_this_week_build(ranked_papers: Sequence[RankedPaper]) -> list[str]:
     return [
         f"- Project: {project}",
         f"- Difficulty: {build_plan.difficulty}",
-        f"- Time: {build_plan.time_estimate}",
+        f"- Time: {estimate_build_time(base, analysis)}",
         f"- Tech Stack: {framework_recommendation_for_paper(base.paper, analysis)}",
         f"- First Step: {newspaper_text(build_plan.suggested_mini_project, '가장 작은 입력 예제로 핵심 아이디어를 검증합니다.')}",
     ]
+
+
+def estimate_build_time(ranked: RankedPaper, analysis: PaperAnalysis) -> str:
+    text = paper_topic_text(ranked.paper, analysis)
+    difficulty = analysis.can_i_build_it.difficulty.count("⭐")
+    if contains_any(text, ["fine-tuning", "training", "robot", "robotics"]) or difficulty >= 5:
+        return "2 weeks"
+    if contains_any(text, ["benchmark", "dataset", "evaluation", "rag", "memory"]) or difficulty >= 4:
+        return "5 days"
+    return "2 days"
 
 
 def practical_project_name(ranked: RankedPaper, analysis: PaperAnalysis) -> str:
@@ -2269,13 +2312,40 @@ def render_research_timeline(
 
     lines: list[str] = []
     for index, ranked in enumerate(ranked_papers, start=1):
-        analysis = ranked.analysis or build_analysis_fallback(ranked.paper)
-        tags = normalize_tags(analysis.tags or infer_dynamic_tags(ranked.paper), max_tags=2)
-        suffix = f" ({', '.join(tags)})" if tags else ""
-        lines.append(f"{daily_index_title(ranked, saved_ranks=saved_ranks)}{suffix}")
+        lines.append(daily_index_title(ranked, saved_ranks=saved_ranks))
+        lines.append("")
+        lines.append(f"({timeline_role(ranked)})")
         if index < len(ranked_papers):
-            lines.extend(["", "↓", ""])
+            next_ranked = ranked_papers[index]
+            lines.extend(["", "↓", "", f"연결 이유: {timeline_connection_reason(ranked, next_ranked)}", ""])
     return lines
+
+
+def timeline_role(ranked: RankedPaper) -> str:
+    category = reading_stage(ranked)
+    labels = {
+        "Foundation": "Foundation",
+        "Benchmark": "Evaluation",
+        "Method": "Method",
+        "Application": "Application",
+        "Survey": "Survey",
+    }
+    return labels.get(category, category)
+
+
+def timeline_connection_reason(current: RankedPaper, next_ranked: RankedPaper) -> str:
+    current_stage = reading_stage(current)
+    next_stage = reading_stage(next_ranked)
+    if current_stage != next_stage:
+        return f"{current_stage} 관점에서 {next_stage} 관점으로 넘어가며 연구 맥락을 넓힙니다."
+    current_analysis = current.analysis or build_analysis_fallback(current.paper)
+    next_analysis = next_ranked.analysis or build_analysis_fallback(next_ranked.paper)
+    current_labels = set(normalize_tags(current_analysis.tags or infer_dynamic_tags(current.paper), max_tags=6))
+    next_labels = set(normalize_tags(next_analysis.tags or infer_dynamic_tags(next_ranked.paper), max_tags=6))
+    shared = sorted(current_labels & next_labels)
+    if shared:
+        return f"둘 다 {', '.join(shared[:2])} 주제를 다루므로 비교해서 읽기 좋습니다."
+    return "앞 논문의 문제 설정을 다음 논문의 방법이나 응용 관점과 연결해 볼 수 있습니다."
 
 
 def newspaper_text(value: str, fallback: str) -> str:
@@ -2513,15 +2583,57 @@ def render_recommended_reading_order(
         return ["_No saved papers available._"]
 
     lines: list[str] = []
-    for index, ranked in enumerate(ranked_papers, start=1):
+    ordered = sorted(ranked_papers, key=lambda ranked: (reading_stage_order(reading_stage(ranked)), ranked.rank))
+    for index, ranked in enumerate(ordered, start=1):
         analysis = ranked.analysis or build_analysis_fallback(ranked.paper)
-        tags = normalize_tags(analysis.tags or infer_dynamic_tags(ranked.paper), max_tags=3)
-        tag_text = ", ".join(tags) if tags else "core topic"
+        stage = reading_stage(ranked)
         lines.append(
             f"{index}. {daily_index_title(ranked, saved_ranks=saved_ranks)} — "
-            f"{tag_text} 흐름을 먼저 잡기 좋습니다. {analysis.one_sentence_summary}"
+            f"{stage}: {reading_stage_reason(stage, analysis)} {analysis.one_sentence_summary}"
         )
     return lines
+
+
+def reading_stage(ranked: RankedPaper) -> str:
+    analysis = ranked.analysis or build_analysis_fallback(ranked.paper)
+    text = paper_topic_text(ranked.paper, analysis)
+    if contains_any(text, ["survey", "review", "taxonomy", "overview"]):
+        return "Survey"
+    if contains_any(text, ["benchmark", "evaluation", "leaderboard", "metric", "dataset"]):
+        return "Benchmark"
+    if contains_any(text, ["method", "framework", "algorithm", "architecture", "training", "optimization", "reasoning"]):
+        return "Method"
+    if contains_any(text, ["application", "system", "tool", "coding", "software", "robot", "automation"]):
+        return "Application"
+    return "Foundation"
+
+
+def reading_stage_order(stage: str) -> int:
+    order = {
+        "Foundation": 0,
+        "Benchmark": 1,
+        "Method": 2,
+        "Application": 3,
+        "Survey": 4,
+    }
+    return order.get(stage, 99)
+
+
+def reading_stage_reason(stage: str, analysis: PaperAnalysis) -> str:
+    reasons = {
+        "Foundation": "먼저 문제 설정과 기본 개념을 잡기 좋습니다.",
+        "Benchmark": "그다음 평가 기준과 비교 지표를 확인하기 좋습니다.",
+        "Method": "평가 기준을 이해한 뒤 방법론을 읽기 좋습니다.",
+        "Application": "방법론을 실제 시스템이나 프로젝트로 연결하기 좋습니다.",
+        "Survey": "마지막에 전체 지형을 정리하며 빠진 연결을 확인하기 좋습니다.",
+    }
+    return reasons.get(stage, contribution_summary(analysis))
+
+
+def short_title(ranked: RankedPaper) -> str:
+    title = str(ranked.paper.get("title", "Untitled Paper")).strip()
+    words = title.split()
+    return " ".join(words[:5]) if len(words) > 5 else title
 
 
 def render_todays_project(ranked_papers: Sequence[RankedPaper]) -> list[str]:

@@ -622,7 +622,9 @@ def test_render_daily_index_includes_interest_level_and_tags():
     assert "| Rank | Score | Interest Level | Title | Tags | Saved | Deep Read |" in markdown
     assert "# 🧭 Today's One Sentence" in markdown
     assert "# 📰 Today's Headlines" in markdown
-    assert "* AI Dataset 연구가" in markdown
+    assert "* Research Trend:" in markdown
+    assert "* Benchmark:" in markdown
+    assert "* Application:" in markdown
     assert "# 📊 Topic Distribution" in markdown
     assert "Dataset (1)" in markdown
     assert "#" in markdown
@@ -729,7 +731,9 @@ def test_daily_newspaper_sections_use_contributions_counts_and_buildable_project
 
     assert "# 🧭 Today's One Sentence" in markdown
     assert "Agent" in markdown
-    assert "* Agent 연구가 평가 기준과 벤치마크" in markdown
+    assert "* Research Trend:" in markdown
+    assert "* Benchmark:" in markdown
+    assert "* Application:" in markdown
     assert "Benchmark (2)" in markdown
     assert "## 🔥 Must Read Today" in markdown
     assert "새로운 Agent 평가 프로토콜을 제안합니다." in markdown
@@ -738,9 +742,100 @@ def test_daily_newspaper_sections_use_contributions_counts_and_buildable_project
     assert "- Future Potential:" in markdown
     assert "- Project: Mini Agent Evaluation Dashboard" in markdown
     assert "- Difficulty: ⭐⭐⭐☆☆" in markdown
-    assert "- Time: 2 days" in markdown
+    assert "- Time: 5 days" in markdown
     assert "- Tech Stack:" in markdown
     assert "- First Step: Create 10 tool-use tasks and score agent failures." in markdown
+
+
+def test_daily_editor_timeline_and_reading_order_have_roles_and_reasons():
+    ranked = [
+        daily.RankedPaper(
+            rank=1,
+            score=0.9,
+            paper={"title": "Foundation Paper", "summary": "core concepts"},
+            analysis=PaperAnalysis(
+                one_sentence_summary="Foundation summary.",
+                tldr="TLDR.",
+                key_contributions="문제 설정을 정리합니다.",
+                why_important="Important.",
+                difference_from_previous_work="Different.",
+                limitations="Limitations.",
+                my_insight="Insight.",
+                can_i_build_it=BuildPlan(),
+                startup_idea="Startup.",
+                project_idea="Project.",
+                related_topics=["Foundation"],
+                tags=["foundation"],
+            ),
+        ),
+        daily.RankedPaper(
+            rank=2,
+            score=0.8,
+            paper={"title": "Application Paper", "summary": "agent tool software application"},
+            analysis=PaperAnalysis(
+                one_sentence_summary="Application summary.",
+                tldr="TLDR.",
+                key_contributions="도구 사용 응용을 제안합니다.",
+                why_important="Important.",
+                difference_from_previous_work="Different.",
+                limitations="Limitations.",
+                my_insight="Insight.",
+                can_i_build_it=BuildPlan(),
+                startup_idea="Startup.",
+                project_idea="Project.",
+                related_topics=["Agent"],
+                tags=["agent", "tool"],
+            ),
+        ),
+        daily.RankedPaper(
+            rank=3,
+            score=0.7,
+            paper={"title": "Benchmark Paper", "summary": "benchmark evaluation metric"},
+            analysis=PaperAnalysis(
+                one_sentence_summary="Benchmark summary.",
+                tldr="TLDR.",
+                key_contributions="평가 기준을 제안합니다.",
+                why_important="Important.",
+                difference_from_previous_work="Different.",
+                limitations="Limitations.",
+                my_insight="Insight.",
+                can_i_build_it=BuildPlan(),
+                startup_idea="Startup.",
+                project_idea="Project.",
+                related_topics=["Benchmark"],
+                tags=["benchmark", "evaluation"],
+            ),
+        ),
+        daily.RankedPaper(
+            rank=4,
+            score=0.6,
+            paper={"title": "Survey Paper", "summary": "survey taxonomy overview"},
+            analysis=PaperAnalysis(
+                one_sentence_summary="Survey summary.",
+                tldr="TLDR.",
+                key_contributions="분류 체계를 정리합니다.",
+                why_important="Important.",
+                difference_from_previous_work="Different.",
+                limitations="Limitations.",
+                my_insight="Insight.",
+                can_i_build_it=BuildPlan(),
+                startup_idea="Startup.",
+                project_idea="Project.",
+                related_topics=["Survey"],
+                tags=["survey"],
+            ),
+        ),
+    ]
+
+    timeline = "\n".join(daily.render_research_timeline(ranked, saved_ranks={1, 2, 3, 4}))
+    order = "\n".join(daily.render_recommended_reading_order(ranked, saved_ranks={1, 2, 3, 4}))
+
+    assert "(Foundation)" in timeline
+    assert "(Application)" in timeline
+    assert "연결 이유:" in timeline
+    assert order.index("Foundation:") < order.index("Benchmark:")
+    assert order.index("Benchmark:") < order.index("Application:")
+    assert order.index("Application:") < order.index("Survey:")
 
 
 def test_render_daily_index_normalizes_category_tags_in_topic_distribution():

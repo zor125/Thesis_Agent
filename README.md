@@ -39,7 +39,7 @@ cp .env.example .env
 OPENAI_API_KEY=your_api_key_here
 ```
 
-dConfigure interests, ranking size, model names, and Obsiian output in
+Configure interests, ranking size, model names, and Obsidian output in
 `config.yaml`.
 
 ```yaml
@@ -79,8 +79,10 @@ models:
 
 ## Run Daily Pipeline
 
+Local run:
+
 ```bash
-python daily.py
+python daily.py --date YYYY-MM-DD
 ```
 
 The pipeline:
@@ -134,6 +136,13 @@ notes.
 ```bash
 PYTHONPATH=src:. pytest
 ```
+ㅋ
+CI:
+
+- pytest only, no OpenAI API calls
+- `python daily.py` is not executed in GitHub Actions
+- `OPENAI_API_KEY` is only required for local pipeline runs
+- tests use temporary paths instead of the local Obsidian vault path in `config.yaml`
 
 ## Fetch Today's arXiv Papers
 
@@ -192,16 +201,69 @@ Save ranking output as a single Markdown note.
 python save.py --input top20.json --mode ranking --vault ~/Documents/ObsidianVault
 ```
 
-## Daily GitHub Action
+## GitHub Actions CI
 
-The `Daily Paper Agent` workflow runs every day at 07:00 KST. It runs the full
-pipeline in `daily.py` and uploads the generated Obsidian Markdown files as an
-artifact. Add `OPENAI_API_KEY` as a GitHub Actions secret before enabling it.
-It can also be started manually from the GitHub Actions tab.
+GitHub Actions runs tests only. It does not execute the daily pipeline and does
+not call the OpenAI API.
 
-In GitHub Actions, `OBSIDIAN_VAULT_PATH` is set to `obsidian` so the generated
-Markdown can be uploaded as an artifact. Locally, `config.yaml` controls the
-Obsidian vault path unless you set `OBSIDIAN_VAULT_PATH` yourself.
+Workflow:
+
+1. checkout
+2. setup-python
+3. `pip install -r requirements.txt`
+4. `pip install pytest`
+5. `pytest`
+
+Run the real daily pipeline locally when you want to fetch papers, call OpenAI,
+and write Obsidian Markdown:
+
+```bash
+python daily.py --date YYYY-MM-DD
+```
+
+## macOS Login Auto Run
+
+Paper_Agent can run once per day when you log in to macOS. This uses a local
+LaunchAgent and is not used by GitHub Actions.
+
+The LaunchAgent is configured to run Paper_Agent from `/Users/zor125/Projects/Paper_Agent`. If you move the project directory later, update the scripts or reinstall after adjusting that path.
+
+The launcher:
+
+- enters the project root
+- activates `.venv` when it exists
+- reads `OPENAI_API_KEY` from `.env` or the shell environment
+- runs `python daily.py --date YYYY-MM-DD`
+- skips execution when `logs/last_run_YYYY-MM-DD` already exists
+- writes stdout/stderr logs under `logs/`
+- opens Obsidian after a successful run
+
+Install:
+
+```bash
+chmod +x scripts/*.sh
+./scripts/install_launchd.sh
+```
+
+Manual test:
+
+```bash
+launchctl start com.zor125.paperagent
+```
+
+Check logs:
+
+```bash
+cat logs/launchd.out.log
+cat logs/launchd.err.log
+cat logs/run_daily_$(date +%F).log
+```
+
+Remove:
+
+```bash
+./scripts/uninstall_launchd.sh
+```
 
 ## Docker
 
