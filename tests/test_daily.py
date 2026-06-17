@@ -1,4 +1,6 @@
 from datetime import date
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -618,11 +620,15 @@ def test_render_daily_index_includes_interest_level_and_tags():
     markdown = daily.render_daily_index(ranked, date(2025, 6, 16), saved_ranks={1}, deep_ranks={1})
 
     assert "| Rank | Score | Interest Level | Title | Tags | Saved | Deep Read |" in markdown
+    assert "# 🧭 Today's One Sentence" in markdown
     assert "# 📰 Today's Headlines" in markdown
-    assert "* AI Dataset 구축 연구 증가" in markdown
+    assert "* AI Dataset 연구가" in markdown
     assert "# 📊 Topic Distribution" in markdown
-    assert "Dataset #" in markdown
+    assert "Dataset (1)" in markdown
+    assert "#" in markdown
     assert "# 💎 Hidden Gem" in markdown
+    assert "- Why Read:" in markdown
+    assert "- Future Potential:" in markdown
     assert "- Reason:" in markdown
     assert "# 🚀 This Week Build" in markdown
     assert "- First Step:" in markdown
@@ -630,6 +636,7 @@ def test_render_daily_index_includes_interest_level_and_tags():
     assert "↓" in markdown or "[[Papers/2506.14683-tagged-paper|Tagged Paper]]" in markdown
     assert "## 🔥 Must Read Today" in markdown
     assert "Reason:" in markdown
+    assert "Contributions." in markdown
     assert "Why it matters:" in markdown
     assert "## 📈 Today's Research Trends" in markdown
     assert "- Dataset: 1 papers" in markdown
@@ -667,6 +674,73 @@ def test_render_daily_index_newspaper_uses_natural_fallback_text():
     assert "자동 생성 실패" not in markdown
     assert "요약 생성에 실패" not in markdown
     assert "판단할 수 없습니다" not in markdown
+
+
+def test_daily_newspaper_sections_use_contributions_counts_and_buildable_project():
+    ranked = [
+        daily.RankedPaper(
+            rank=1,
+            score=0.8,
+            paper={"title": "AgentEval", "summary": "agent benchmark evaluation"},
+            analysis=PaperAnalysis(
+                one_sentence_summary="AgentEval evaluates tool-use agents.",
+                tldr="TLDR.",
+                key_contributions="새로운 Agent 평가 프로토콜을 제안합니다.",
+                why_important="Agent 평가 자동화에 중요합니다.",
+                difference_from_previous_work="기존 벤치마크보다 도구 사용 실패를 더 잘 드러냅니다.",
+                limitations="Small benchmark.",
+                my_insight="Insight.",
+                can_i_build_it=BuildPlan(
+                    difficulty="⭐⭐⭐☆☆",
+                    time_estimate="2 days",
+                    need_gpu="No",
+                    need_dataset="Yes",
+                    undergraduate_friendly="Yes",
+                    suggested_mini_project="Create 10 tool-use tasks and score agent failures.",
+                ),
+                startup_idea="Startup.",
+                project_idea="Vague idea.",
+                related_topics=["Agent", "Benchmark"],
+                tags=["agent", "benchmark", "evaluation"],
+            ),
+        ),
+        daily.RankedPaper(
+            rank=6,
+            score=0.55,
+            paper={"title": "MemoryBench", "summary": "memory benchmark dataset"},
+            analysis=PaperAnalysis(
+                one_sentence_summary="MemoryBench tests long context memory.",
+                tldr="TLDR.",
+                key_contributions="장기 메모리 평가 데이터셋을 제안합니다.",
+                why_important="Memory 평가에 중요합니다.",
+                difference_from_previous_work="기존 평가보다 장기 문맥 실패를 더 잘 드러냅니다.",
+                limitations="Small dataset.",
+                my_insight="Insight.",
+                can_i_build_it=BuildPlan(),
+                startup_idea="Startup.",
+                project_idea="Project.",
+                related_topics=["Memory", "Benchmark"],
+                tags=["memory", "benchmark", "dataset"],
+            ),
+        ),
+    ]
+
+    markdown = daily.render_daily_index(ranked, date(2025, 6, 16), saved_ranks={1}, deep_ranks=set())
+
+    assert "# 🧭 Today's One Sentence" in markdown
+    assert "Agent" in markdown
+    assert "* Agent 연구가 평가 기준과 벤치마크" in markdown
+    assert "Benchmark (2)" in markdown
+    assert "## 🔥 Must Read Today" in markdown
+    assert "새로운 Agent 평가 프로토콜을 제안합니다." in markdown
+    assert "- Why Read:" in markdown
+    assert "- Novelty:" in markdown
+    assert "- Future Potential:" in markdown
+    assert "- Project: Mini Agent Evaluation Dashboard" in markdown
+    assert "- Difficulty: ⭐⭐⭐☆☆" in markdown
+    assert "- Time: 2 days" in markdown
+    assert "- Tech Stack:" in markdown
+    assert "- First Step: Create 10 tool-use tasks and score agent failures." in markdown
 
 
 def test_render_daily_index_normalizes_category_tags_in_topic_distribution():
@@ -713,8 +787,8 @@ def test_render_daily_index_normalizes_category_tags_in_topic_distribution():
 
     distribution = "\n".join(daily.render_topic_distribution(ranked))
 
-    assert "AI #" in distribution
-    assert "NLP #" in distribution
+    assert "AI (1)" in distribution
+    assert "NLP (1)" in distribution
     assert "cs-ai #" not in distribution
     assert "cs-cl #" not in distribution
 
@@ -900,3 +974,69 @@ def test_enrich_ranked_papers_keeps_top_paper_with_deep_read_fallback(monkeypatc
 
     assert len(enriched) == 1
     assert "PDF 심층 분석에 실패했습니다" in enriched[0].deep_analysis
+
+
+def test_enrich_ranked_papers_limits_concurrency(monkeypatch, tmp_path):
+    lock = threading.Lock()
+    active_summary = 0
+    max_active_summary = 0
+    active_deep = 0
+    max_active_deep = 0
+
+    def fake_analyze_abstract(title, abstract, *, model):
+        nonlocal active_summary, max_active_summary
+        with lock:
+            active_summary += 1
+            max_active_summary = max(max_active_summary, active_summary)
+        time.sleep(0.02)
+        with lock:
+            active_summary -= 1
+        return daily.build_analysis_fallback({"title": title, "summary": abstract})
+
+    class FakeDeepResult:
+        paper_type = "Research"
+        markdown = "## Paper Type\n\n- Type: Research\n\n## Method\n\nDeep"
+
+    def fake_deep_read_pdf(title, pdf_url, work_dir, *, abstract, model):
+        nonlocal active_deep, max_active_deep
+        with lock:
+            active_deep += 1
+            max_active_deep = max(max_active_deep, active_deep)
+        time.sleep(0.02)
+        with lock:
+            active_deep -= 1
+        return FakeDeepResult()
+
+    monkeypatch.setattr(daily, "analyze_abstract", fake_analyze_abstract)
+    monkeypatch.setattr(daily, "deep_read_pdf", fake_deep_read_pdf)
+    ranked = [
+        daily.RankedPaper(
+            rank=index + 1,
+            score=0.9 - index * 0.01,
+            paper={
+                "title": f"paper {index}",
+                "summary": "abstract",
+                "pdf_url": f"http://example.com/{index}.pdf",
+            },
+        )
+        for index in range(6)
+    ]
+    stats = daily.PipelineStats()
+
+    enriched = daily.enrich_ranked_papers(
+        ranked,
+        tmp_path,
+        summary_model="summary-model",
+        deep_read_model="deep-model",
+        deep_read_count=2,
+        max_concurrency=3,
+        stats=stats,
+    )
+
+    assert [item.rank for item in enriched] == [1, 2, 3, 4, 5, 6]
+    assert max_active_summary <= 3
+    assert max_active_deep <= 3
+    assert enriched[0].deep_analysis
+    assert enriched[1].deep_analysis
+    assert not enriched[2].deep_analysis
+    assert stats.response_calls == 8

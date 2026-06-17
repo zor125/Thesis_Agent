@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -237,63 +238,96 @@ def enrich_ranked_papers(
     summary_model: str,
     deep_read_model: str,
     deep_read_count: int,
+    max_concurrency: int = 3,
     stats: PipelineStats | None = None,
 ) -> list[RankedPaper]:
+    if not ranked_papers:
+        return []
+
+    max_workers = max(1, min(max_concurrency, 3, len(ranked_papers)))
+    if stats is not None:
+        stats.response_calls += len(ranked_papers)
+
+    analyses: dict[int, PaperAnalysis] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(analyze_ranked_abstract, ranked, summary_model): index
+            for index, ranked in enumerate(ranked_papers)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            analyses[index] = future.result()
+
+    deep_candidates = [ranked for ranked in ranked_papers if ranked.rank <= deep_read_count]
+    if stats is not None:
+        stats.response_calls += sum(1 for ranked in deep_candidates if ranked.paper.get("pdf_url"))
+
+    deep_results: dict[int, tuple[str, str]] = {}
+    if deep_candidates:
+        deep_workers = max(1, min(max_concurrency, 3, len(deep_candidates)))
+        with ThreadPoolExecutor(max_workers=deep_workers) as executor:
+            futures = {
+                executor.submit(read_ranked_pdf_deep, ranked, work_dir, deep_read_model): index
+                for index, ranked in enumerate(ranked_papers)
+                if ranked.rank <= deep_read_count
+            }
+            for future in as_completed(futures):
+                index = futures[future]
+                deep_results[index] = future.result()
+
     enriched = []
-    for ranked in ranked_papers:
-        paper = ranked.paper
-        title = str(paper.get("title", "Untitled Paper"))
-        abstract = str(paper.get("summary", ""))
-        short_summary = ""
-        deep_analysis = ""
-
-        try:
-            if stats is not None:
-                stats.response_calls += 1
-            analysis = analyze_abstract(title, abstract, model=summary_model)
-        except Exception as exc:
-            logging.warning("Using fallback summary after abstract summary failure: %s (%s)", title, exc)
-            analysis = build_analysis_fallback(paper)
-
-        if ranked.rank <= deep_read_count:
-            pdf_url = paper.get("pdf_url")
-            if pdf_url:
-                try:
-                    if stats is not None:
-                        stats.response_calls += 1
-                    deep_analysis = deep_read_pdf(
-                        title,
-                        str(pdf_url),
-                        work_dir / safe_filename(str(paper.get("arxiv_id", title))),
-                        abstract=abstract,
-                        model=deep_read_model,
-                    )
-                    paper_type = deep_analysis.paper_type
-                    deep_analysis_markdown = deep_analysis.markdown
-                except Exception as exc:
-                    logging.warning("Using fallback deep analysis after deep read failure: %s (%s)", title, exc)
-                    paper_type = classify_paper_type_fallback(paper)
-                    deep_analysis_markdown = build_deep_read_fallback(paper, exc, paper_type=paper_type)
-            else:
-                logging.warning("Using fallback deep analysis for %s: no pdf_url", title)
-                paper_type = classify_paper_type_fallback(paper)
-                deep_analysis_markdown = build_deep_read_fallback(paper, "no pdf_url", paper_type=paper_type)
-        else:
-            paper_type = classify_paper_type_fallback(paper)
-            deep_analysis_markdown = ""
-
+    for index, ranked in enumerate(ranked_papers):
+        paper_type, deep_analysis_markdown = deep_results.get(
+            index,
+            (classify_paper_type_fallback(ranked.paper), ""),
+        )
         enriched.append(
             RankedPaper(
                 rank=ranked.rank,
                 score=ranked.score,
-                paper=paper,
-                analysis=analysis,
+                paper=ranked.paper,
+                analysis=analyses[index],
                 deep_analysis=deep_analysis_markdown,
                 paper_type=paper_type,
                 embedding=ranked.embedding,
             )
         )
     return enriched
+
+
+def analyze_ranked_abstract(ranked: RankedPaper, summary_model: str) -> PaperAnalysis:
+    paper = ranked.paper
+    title = str(paper.get("title", "Untitled Paper"))
+    abstract = str(paper.get("summary", ""))
+    try:
+        return analyze_abstract(title, abstract, model=summary_model)
+    except Exception as exc:
+        logging.warning("Using fallback summary after abstract summary failure: %s (%s)", title, exc)
+        return build_analysis_fallback(paper)
+
+
+def read_ranked_pdf_deep(ranked: RankedPaper, work_dir: Path, deep_read_model: str) -> tuple[str, str]:
+    paper = ranked.paper
+    title = str(paper.get("title", "Untitled Paper"))
+    abstract = str(paper.get("summary", ""))
+    pdf_url = paper.get("pdf_url")
+    if not pdf_url:
+        logging.warning("Using fallback deep analysis for %s: no pdf_url", title)
+        paper_type = classify_paper_type_fallback(paper)
+        return paper_type, build_deep_read_fallback(paper, "no pdf_url", paper_type=paper_type)
+    try:
+        deep_analysis = deep_read_pdf(
+            title,
+            str(pdf_url),
+            work_dir / safe_filename(str(paper.get("arxiv_id", title))),
+            abstract=abstract,
+            model=deep_read_model,
+        )
+        return deep_analysis.paper_type, deep_analysis.markdown
+    except Exception as exc:
+        logging.warning("Using fallback deep analysis after deep read failure: %s (%s)", title, exc)
+        paper_type = classify_paper_type_fallback(paper)
+        return paper_type, build_deep_read_fallback(paper, exc, paper_type=paper_type)
 
 
 def build_analysis_fallback(paper: dict[str, Any]) -> PaperAnalysis:
@@ -1977,6 +2011,10 @@ def render_research_newspaper_sections(
     saved_ranks: set[int],
 ) -> list[str]:
     return [
+        "# 🧭 Today's One Sentence",
+        "",
+        render_todays_one_sentence(ranked_papers),
+        "",
         "# 📰 Today's Headlines",
         "",
         *render_todays_headlines(ranked_papers),
@@ -2008,42 +2046,65 @@ def render_todays_headlines(ranked_papers: Sequence[RankedPaper]) -> list[str]:
         ]
 
     trend_counts = collect_trend_counts(ranked_papers)
-    top_trends = [label for label, _ in trend_counts[:3]]
+    top_trends = unique_preserving_order(label for label, _ in trend_counts)[:3]
     defaults = ["AI Software Engineer 연구 증가", "Agent Evaluation 연구 활발", "RL Reasoning 논문 지속 증가"]
-    headlines = [headline_for_trend(label) for label in top_trends]
+    headlines = [headline_for_trend(label, ranked_papers) for label in top_trends]
     return [f"* {headline}" for headline in unique_preserving_order([*headlines, *defaults])[:3]]
 
 
-def headline_for_trend(label: str) -> str:
+def headline_for_trend(label: str, ranked_papers: Sequence[RankedPaper] | None = None) -> str:
+    contribution = trend_contribution_phrase(label, ranked_papers or [])
     headlines = {
-        "AI": "AI 연구 응용 범위 확대",
-        "NLP": "NLP 평가와 언어 이해 연구 지속",
-        "Machine Learning": "Machine Learning 최적화 연구 증가",
-        "Software Engineering": "AI Software Engineer 연구 증가",
-        "Information Retrieval": "RAG와 검색 기반 연구 재부상",
-        "Agent": "Agent Evaluation 연구 활발",
-        "RAG": "RAG 파이프라인 개선 연구 증가",
-        "Reasoning": "RL Reasoning 논문 지속 증가",
-        "Coding Agent": "AI Software Engineer 연구 증가",
-        "Multi Agent": "Multi Agent 협업 구조 연구 확대",
-        "Long Context": "Long Context 처리 전략 고도화",
-        "Memory": "LLM Memory 연구 실용화 흐름",
-        "Robotics": "Robotics와 LLM Planning 연결 강화",
-        "Benchmark": "Agent Evaluation 연구 활발",
-        "Evaluation": "Agent Evaluation 연구 활발",
-        "Dataset": "AI Dataset 구축 연구 증가",
+        "AI": f"AI 연구가 {contribution} 중심으로 확장",
+        "NLP": f"NLP 연구가 {contribution} 쪽으로 이동",
+        "Machine Learning": f"Machine Learning 연구가 {contribution}을 강화",
+        "Software Engineering": f"AI Software Engineer 연구가 {contribution}에 집중",
+        "Information Retrieval": f"RAG와 검색 연구가 {contribution}을 재부상",
+        "Agent": f"Agent 연구가 {contribution}을 중심으로 활발",
+        "RAG": f"RAG 파이프라인 연구가 {contribution}을 강화",
+        "Reasoning": f"Reasoning 연구가 {contribution}으로 진화",
+        "Coding Agent": f"AI Software Engineer 연구가 {contribution}으로 구체화",
+        "Multi Agent": f"Multi Agent 연구가 {contribution}을 확대",
+        "Long Context": f"Long Context 연구가 {contribution}을 고도화",
+        "Memory": f"LLM Memory 연구가 {contribution}으로 실용화",
+        "Robotics": f"Robotics와 LLM Planning 연구가 {contribution}으로 연결",
+        "Benchmark": f"Benchmark 연구가 {contribution}을 기준점으로 제시",
+        "Evaluation": f"Evaluation 연구가 {contribution}을 정교화",
+        "Dataset": f"AI Dataset 연구가 {contribution}을 새롭게 정의",
     }
-    return headlines.get(label, f"{label} 연구 흐름 강화")
+    return headlines.get(label, f"{label} 연구가 {contribution} 흐름을 강화")
+
+
+def trend_contribution_phrase(label: str, ranked_papers: Sequence[RankedPaper]) -> str:
+    for ranked in ranked_papers:
+        analysis = ranked.analysis or build_analysis_fallback(ranked.paper)
+        labels = [
+            *normalize_related_topics(analysis.related_topics or infer_related_topics(ranked.paper)),
+            *normalize_tags(analysis.tags or infer_dynamic_tags(ranked.paper), max_tags=6),
+        ]
+        if label not in {display_trend_label(item) for item in labels}:
+            continue
+        text = paper_topic_text(ranked.paper, analysis)
+        if contains_any(text, ["benchmark", "evaluation", "metric"]):
+            return "평가 기준과 벤치마크"
+        if contains_any(text, ["dataset", "corpus", "annotation"]):
+            return "데이터셋과 태스크 정의"
+        if contains_any(text, ["tool", "agent", "planning", "planner"]):
+            return "에이전트 설계와 도구 사용"
+        if contains_any(text, ["memory", "long context", "retrieval", "rag"]):
+            return "지식 검색과 장기 문맥"
+        return contribution_summary(analysis)
+    return "새 문제 설정"
 
 
 def render_topic_distribution(ranked_papers: Sequence[RankedPaper]) -> list[str]:
     trend_counts = collect_trend_counts(ranked_papers)
     if not trend_counts:
-        return ["Research ########"]
-    return [
-        f"{label} {topic_bar(count)}"
-        for label, count in trend_counts[:8]
-    ]
+        return ["Research (0)", ""]
+    lines: list[str] = []
+    for label, count in trend_counts[:8]:
+        lines.extend([f"{label} ({count})", topic_bar(count), ""])
+    return lines[:-1]
 
 
 def topic_bar(count: int) -> str:
@@ -2067,7 +2128,9 @@ def render_hidden_gem(
     return [
         f"- Paper: {daily_index_title(gem, saved_ranks=saved_ranks)}",
         f"- Rank: {gem.rank}",
+        f"- Why Read: {hidden_gem_why_read(gem, analysis)}",
         f"- Novelty: {novelty_rating(gem)}",
+        f"- Future Potential: {hidden_gem_future_potential(gem, analysis)}",
         f"- Reason: {hidden_gem_reason(gem, analysis)}",
     ]
 
@@ -2114,6 +2177,22 @@ def hidden_gem_reason(ranked: RankedPaper, analysis: PaperAnalysis) -> str:
     return f"상위권은 아니지만 {newspaper_text(analysis.one_sentence_summary, '관심 주제와 연결되는 독립적인 아이디어')} 때문에 따로 저장해둘 가치가 있습니다."
 
 
+def hidden_gem_why_read(ranked: RankedPaper, analysis: PaperAnalysis) -> str:
+    contribution = contribution_summary(analysis)
+    return f"Top5 밖에서도 {contribution}이 뚜렷해 후속 아이디어를 얻기 좋습니다."
+
+
+def hidden_gem_future_potential(ranked: RankedPaper, analysis: PaperAnalysis) -> str:
+    text = paper_topic_text(ranked.paper, analysis)
+    if contains_any(text, ["benchmark", "evaluation"]):
+        return "새 평가 기준이나 리더보드로 확장될 가능성이 있습니다."
+    if contains_any(text, ["dataset", "corpus"]):
+        return "데이터셋 기반 후속 연구와 미니 프로젝트로 확장하기 쉽습니다."
+    if contains_any(text, ["agent", "tool", "planning"]):
+        return "Agent 자동화 기능이나 도구 사용 실험으로 구현해볼 수 있습니다."
+    return "관련 주제의 비교 실험이나 Obsidian 연구 아이디어로 재활용할 수 있습니다."
+
+
 def render_this_week_build(ranked_papers: Sequence[RankedPaper]) -> list[str]:
     if not ranked_papers:
         return [
@@ -2127,7 +2206,7 @@ def render_this_week_build(ranked_papers: Sequence[RankedPaper]) -> list[str]:
     base = ranked_papers[0]
     analysis = base.analysis or build_analysis_fallback(base.paper)
     build_plan = analysis.can_i_build_it
-    project = newspaper_text(analysis.project_idea, build_plan.suggested_mini_project)
+    project = practical_project_name(base, analysis)
     return [
         f"- Project: {project}",
         f"- Difficulty: {build_plan.difficulty}",
@@ -2135,6 +2214,49 @@ def render_this_week_build(ranked_papers: Sequence[RankedPaper]) -> list[str]:
         f"- Tech Stack: {framework_recommendation_for_paper(base.paper, analysis)}",
         f"- First Step: {newspaper_text(build_plan.suggested_mini_project, '가장 작은 입력 예제로 핵심 아이디어를 검증합니다.')}",
     ]
+
+
+def practical_project_name(ranked: RankedPaper, analysis: PaperAnalysis) -> str:
+    text = paper_topic_text(ranked.paper, analysis)
+    if contains_any(text, ["benchmark", "evaluation"]):
+        return "Mini Agent Evaluation Dashboard"
+    if contains_any(text, ["coding", "software", "code"]):
+        return "Coding Agent Task Runner"
+    if contains_any(text, ["rag", "retrieval"]):
+        return "Paper RAG Quality Checker"
+    if contains_any(text, ["memory", "long context"]):
+        return "LLM Memory Experiment Tracker"
+    if contains_any(text, ["dataset", "corpus"]):
+        return "Dataset Inspection and Scoring Tool"
+    if contains_any(text, ["robot", "robotics"]):
+        return "LLM Robotics Planning Simulator"
+    return "AI Paper Insight Prototype"
+
+
+def render_todays_one_sentence(ranked_papers: Sequence[RankedPaper]) -> str:
+    if not ranked_papers:
+        return "오늘은 수집된 후보가 없어 AI 연구 흐름을 판단하기 어렵습니다."
+    trend_counts = collect_trend_counts(ranked_papers)
+    labels = [label for label, _ in trend_counts[:3]]
+    if not labels:
+        return "오늘 AI 연구는 다양한 주제가 분산되어 있어 Top20 후보를 직접 훑어볼 가치가 있습니다."
+    contribution = trend_contribution_phrase(labels[0], ranked_papers)
+    if len(labels) == 1:
+        return f"오늘 AI 연구는 {labels[0]}를 중심으로 {contribution}을 강화하는 흐름입니다."
+    return f"오늘 AI 연구는 {', '.join(labels[:-1])}, {labels[-1]}를 중심으로 {contribution}을 강화하는 흐름입니다."
+
+
+def contribution_summary(analysis: PaperAnalysis) -> str:
+    for value in [analysis.key_contributions, analysis.difference_from_previous_work, analysis.one_sentence_summary]:
+        cleaned = newspaper_text(value, "")
+        if cleaned:
+            return truncate_sentence(cleaned)
+    return "핵심 기여"
+
+
+def truncate_sentence(value: str, limit: int = 90) -> str:
+    cleaned = " ".join(str(value).split())
+    return cleaned if len(cleaned) <= limit else f"{cleaned[:limit].rstrip()}..."
 
 
 def render_research_timeline(
@@ -2208,12 +2330,24 @@ def render_must_read_today(
         lines.extend(
             [
                 f"{index}. {daily_index_title(ranked, saved_ranks=saved_ranks)}",
-                f"   - Reason: {newspaper_text(analysis.one_sentence_summary, 'High similarity with your interests.')}",
+                f"   - Reason: {must_read_reason(ranked, analysis)}",
                 f"   - Why it matters: {newspaper_text(analysis.why_important, 'Useful reference for Agent and Coding Agent research.')}",
                 "",
             ]
         )
     return lines[:-1] if lines else lines
+
+
+def must_read_reason(ranked: RankedPaper, analysis: PaperAnalysis) -> str:
+    contribution = contribution_summary(analysis)
+    text = paper_topic_text(ranked.paper, analysis)
+    if contains_any(text, ["benchmark", "evaluation"]):
+        return f"{contribution} 특히 평가 기준과 비교 실험 관점이 강해 오늘 먼저 읽을 가치가 있습니다."
+    if contains_any(text, ["agent", "tool", "planning"]):
+        return f"{contribution} Agent 설계나 도구 사용 흐름에 바로 연결됩니다."
+    if contains_any(text, ["rag", "retrieval", "memory", "long context"]):
+        return f"{contribution} 지식 검색, 메모리, 긴 문맥 처리 개선에 연결됩니다."
+    return f"{contribution} 유사도 {ranked.score:.3f}로 오늘 관심사와 강하게 맞닿아 있습니다."
 
 
 def render_research_trends(ranked_papers: Sequence[RankedPaper]) -> list[str]:
