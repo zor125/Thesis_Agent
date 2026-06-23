@@ -6,7 +6,7 @@ import sys
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterable
 from xml.etree import ElementTree
@@ -29,18 +29,44 @@ class Paper:
     entry_url: str
 
 
-def build_query_url(category: str, target_date: date, max_results: int) -> str:
-    start = datetime.combine(target_date, time.min, tzinfo=timezone.utc)
-    end = datetime.combine(target_date, time.max, tzinfo=timezone.utc)
-    submitted_range = f"{start:%Y%m%d%H%M} TO {end:%Y%m%d%H%M}"
+def build_query_url(category: str, max_results: int, *, sort_by: str = "submittedDate") -> str:
     params = {
-        "search_query": f"cat:{category} AND submittedDate:[{submitted_range}]",
+        "search_query": f"cat:{category}",
         "start": 0,
         "max_results": max_results,
-        "sortBy": "submittedDate",
+        "sortBy": sort_by,
         "sortOrder": "descending",
     }
     return f"{ARXIV_API_URL}?{urllib.parse.urlencode(params)}"
+
+
+def expanded_max_results(max_results: int) -> int:
+    return max(max_results * 5, 500)
+
+
+def filter_by_published_date(papers: Iterable[Paper], target_date: date) -> list[Paper]:
+    return [paper for paper in papers if published_utc_date(paper.published) == target_date]
+
+
+def published_utc_date(value: str) -> date | None:
+    try:
+        cleaned = value.strip().replace("Z", "+00:00")
+        return datetime.fromisoformat(cleaned).astimezone(timezone.utc).date()
+    except ValueError:
+        return None
+
+
+def debug_feed(url: str, raw_papers: list[Paper], filtered_papers: list[Paper], target_date: date) -> None:
+    print(f"arXiv query URL: {url}", file=sys.stderr)
+    print(f"raw feed entry count: {len(raw_papers)}", file=sys.stderr)
+    print(f"filtered count: {len(filtered_papers)}", file=sys.stderr)
+    for index, paper in enumerate(raw_papers[:10], start=1):
+        print(
+            f"entry {index}: title={paper.title} published={paper.published} updated={paper.updated}",
+            file=sys.stderr,
+        )
+    if not filtered_papers:
+        print(f"Fetched 0 papers after filtering by published date {target_date.isoformat()}", file=sys.stderr)
 
 
 def fetch_feed(url: str, timeout: int) -> bytes:
@@ -130,6 +156,13 @@ def parse_args() -> argparse.Namespace:
         help="Output JSON path. Use '-' to print to stdout.",
     )
     parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout seconds.")
+    parser.add_argument(
+        "--sort-by",
+        choices=["submittedDate", "lastUpdatedDate"],
+        default="submittedDate",
+        help="arXiv API sort field. Use lastUpdatedDate if submittedDate is unstable.",
+    )
+    parser.add_argument("--debug", action="store_true", help="Print arXiv URL and feed filtering details.")
     return parser.parse_args()
 
 
@@ -140,8 +173,14 @@ def main() -> int:
         return 2
 
     output_path = None if str(args.output) == "-" else args.output
-    url = build_query_url(args.category, args.date, args.max_results)
-    papers = parse_feed(fetch_feed(url, args.timeout))
+    raw_max_results = expanded_max_results(args.max_results)
+    url = build_query_url(args.category, raw_max_results, sort_by=args.sort_by)
+    raw_papers = parse_feed(fetch_feed(url, args.timeout))
+    papers = filter_by_published_date(raw_papers, args.date)[: args.max_results]
+    if args.debug:
+        debug_feed(url, raw_papers, papers, args.date)
+    elif not papers:
+        print(f"Fetched 0 papers after filtering by published date {args.date.isoformat()}", file=sys.stderr)
     write_json(papers, output_path)
 
     destination = "stdout" if output_path is None else output_path

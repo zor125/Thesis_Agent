@@ -16,7 +16,7 @@ import yaml
 
 from deep_read import deep_read_pdf
 from embedding import create_embeddings
-from fetch import build_query_url, fetch_feed, parse_feed
+from fetch import build_query_url, expanded_max_results, fetch_feed, filter_by_published_date, parse_feed
 from memory_store import MemoryEntry, MemoryRecommendation, load_memory_db, recommend_memory_entries, upsert_memory_entries
 from rank import cosine_similarity
 from resources import extract_code_resources, render_code_resources
@@ -114,7 +114,7 @@ def run_daily(config_path: Path, *, today: date | None = None, stats: PipelineSt
 
     papers = fetch_papers(category, target_date, max_results)
     stats.fetched_papers = len(papers)
-    logging.debug("Fetched papers: %s", len(papers))
+    logging.info("Fetched papers: %s", len(papers))
     logging.debug("Embedding candidate papers: %s", count_embedding_candidates(papers))
 
     candidate_papers = rank_papers_by_interest(
@@ -153,8 +153,12 @@ def run_daily(config_path: Path, *, today: date | None = None, stats: PipelineSt
 
 
 def fetch_papers(category: str, target_date: date, max_results: int) -> list[dict[str, Any]]:
-    url = build_query_url(category, target_date, max_results)
-    papers = parse_feed(fetch_feed(url, timeout=30))
+    raw_max_results = expanded_max_results(max_results)
+    url = build_query_url(category, raw_max_results)
+    raw_papers = parse_feed(fetch_feed(url, timeout=30))
+    papers = filter_by_published_date(raw_papers, target_date)[:max_results]
+    if not papers:
+        logging.info("Fetched 0 papers after filtering by published date %s", target_date.isoformat())
     return [normalize_paper(paper) for paper in papers]
 
 

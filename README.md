@@ -338,13 +338,31 @@ LaunchAgent and is not used by GitHub Actions.
 
 The LaunchAgent is configured to run Paper_Agent from `/Users/zor125/Projects/Paper_Agent`. If you move the project directory later, update the scripts or reinstall after adjusting that path.
 
-The automatic macOS launcher uses yesterday's date by default to avoid arXiv indexing delays.
+The automatic macOS launcher starts from yesterday's date, then searches backward
+up to 7 days for the most recent arXiv date that has papers and has not already
+been processed. This avoids timezone delays, arXiv indexing delays, weekends,
+and dates with no newly published papers.
+
+For each candidate date, the launcher first checks availability with:
+
+```bash
+python fetch.py --date YYYY-MM-DD --max-results 100 --debug
+```
+
+Only dates with `filtered count > 0` are eligible for `daily.py`. A date is
+considered processed only after `daily.py` succeeds and
+`logs/last_run_YYYY-MM-DD` is created. If that file already exists, the launcher
+never runs `daily.py` for that date again, so logging in multiple times on the
+same day will not generate duplicate Markdown for the same paper date. If no
+eligible date is found, the launcher logs `No new paper date found. Skipping run.`
+and exits normally.
 
 Example:
 
 ```text
-Login on:      2026-06-17
-Pipeline date: 2026-06-16
+Login on:      2026-06-23
+Checks:        2026-06-22, 2026-06-21, 2026-06-20, ...
+Pipeline date: first checked date with papers and no last_run file
 ```
 
 The launcher:
@@ -353,8 +371,9 @@ The launcher:
 - waits 30 seconds for network readiness
 - uses `.venv/bin/python` when it exists
 - reads only `OPENAI_API_KEY` from `.env` or the shell environment
-- runs `daily.py` with yesterday's date
-- skips execution when `logs/last_run_YYYY-MM-DD` already exists
+- checks recent candidate dates with `fetch.py --debug`
+- skips dates when `logs/last_run_YYYY-MM-DD` already exists
+- runs `daily.py` for the first date with papers that has not been processed
 - writes stdout/stderr logs under `logs/`
 - opens Obsidian after a successful run
 
